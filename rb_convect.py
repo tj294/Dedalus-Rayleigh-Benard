@@ -9,6 +9,7 @@ import logging
 import os
 from datetime import datetime
 import time
+import pathlib
 
 import argparse
 import run_params as rp
@@ -32,7 +33,7 @@ parser.add_argument(
     default="output/",
 )
 
-parser.add_argument("-i", "--initial", help="Path to file to read input from.")
+parser.add_argument("-i", "--initial", help="Path to folder to read input from.")
 
 args = parser.parse_args()
 if args.test:
@@ -43,6 +44,9 @@ else:
 if save:
     outpath = os.path.normpath(args.output_folder) + "/"
     os.makedirs(outpath, exist_ok=True)
+
+if args.initial:
+    restart_path = os.path.normpath(args.initial) + "/"
 
 # ====================
 # FUNCTION DEFINITIONS
@@ -123,6 +127,10 @@ if not args.initial:
     Ra = rp.Ra
 else:
     print("Reading initial conditions not yet implemented")
+    a = rp.a
+    Nx, Nz = rp.Nx, rp.Nz
+    Pr = rp.Pr
+    Ra = rp.Ra
 
 # ====================
 # Create basis and domain
@@ -147,7 +155,7 @@ print("=============\n")
 # Initial Conditions
 # ====================
 if not args.initial:
-    z = domain.grid(1)
+    x, z = domain.all_grids()
     T = solver.state["T"]
     Tz = solver.state["Tz"]
     # Random temperature perturbations
@@ -161,23 +169,27 @@ if not args.initial:
     pert = 1e-5 * noise * (zt - z) * (z - zb)
     T["g"] = pert
     T.differentiate("z", out=Tz)
+    first_iter = 0
 
     dt = rp.dt
 
     fh_mode = "overwrite"
 else:
-    print("initial condition reading not yet implemented")
-    exit(-999)
-    write, last_dt = solver.load_state("restart.h5", -1)
+    if pathlib.Path(restart_path + "restart.h5").exists():
+        write, last_dt = solver.load_state(args.initial + "restart.h5", -1)
+    else:
+        print("{}restart.h5 does not exist.".format(restart_path))
+        exit(-10)
 
     dt = last_dt
+    first_iter = solver.iteration
 
     fh_mode = "append"
 
 max_dt = rp.max_dt
 solver.stop_sim_time = rp.end_sim_time
 solver.stop_wall_time = rp.end_wall_time
-solver.stop_iteration = rp.end_iteration
+solver.stop_iteration = first_iter + rp.end_iteration + 1
 # ====================
 # CFL Conditions
 # ====================
