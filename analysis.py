@@ -28,6 +28,8 @@ args = parser.parse_args()
 
 direc = os.path.normpath(args.input) + "/"
 
+os.mkdirs(direc + "figure", exists_ok=True)
+
 x = de.Fourier("x", 256, interval=(0, 3), dealias=3 / 2)
 z = de.Chebyshev("z", 64, interval=(0, 1), dealias=3 / 2)
 x = np.array(x.grid(1))
