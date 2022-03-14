@@ -5,15 +5,15 @@ import numpy as np
 
 a = 3
 Nx, Nz = 256, 64
-Pr = 0.8
+Pr = 1.0
 Ra = 1e6
 
-dt = 3e-6
-max_dt = 1e-5
+dt = 1e-5
+max_dt = 5e-4
 
-end_sim_time = np.inf
+end_sim_time = 1.6
 end_wall_time = np.inf
-end_iteration = 1e5
+end_iteration = np.inf
 
 snapshot_iter = 50
 analysis_iter = 50

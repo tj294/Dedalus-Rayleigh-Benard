@@ -1,4 +1,5 @@
 """
+Pseudo-spectral 2D Rayleigh-Bénard convection simulation code.
 Author: Tom Joshi-Cale
 """
 # ===================
@@ -18,6 +19,10 @@ import dedalus.public as de
 from dedalus.extras import flow_tools
 
 logger = logging.getLogger(__name__)
+
+
+class NaNError(Exception):
+    pass
 
 
 # ====================
@@ -75,7 +80,7 @@ def initialise_problem(domain, Ra, Pr):
     )
 
     # Temperature equation
-    problem.add_equation("dt(T) - (dx(dx(T)) + dz(Tz)) = -(u*dx(T) + w*Tz)")
+    problem.add_equation("dt(T) - Pr*(dx(dx(T)) + dz(Tz)) = -(u*dx(T) + w*Tz)")
 
     # ====================
     # Add boundary conditions
@@ -91,7 +96,7 @@ def initialise_problem(domain, Ra, Pr):
     #
     # Top boundary fixed at T=0
     problem.add_bc("right(T) = 0")
-    # No heat flow through left boundary
+    # Fixed heat flux through left boundary
     problem.add_bc("left(Tz) = -1")
 
     return problem
@@ -149,13 +154,13 @@ problem = initialise_problem(domain, Ra, Pr)
 # ====================
 solver = problem.build_solver(de.timesteppers.RK222)
 logger.info("Solver built")
-print("=============\n")
 
 # ====================
 # Initial Conditions
 # ====================
 if not args.initial:
-    x, z = domain.all_grids()
+    x = domain.grid(0)
+    z = domain.grid(1)
     T = solver.state["T"]
     Tz = solver.state["Tz"]
     # Random temperature perturbations
@@ -216,8 +221,13 @@ snapshots = solver.evaluator.add_file_handler(
 snapshots.add_system(solver.state)
 
 # Analysis tasks
-analysis = analysis_task_setup(solver, outpath, rp.analysis_iter)
+analysis = solver.evaluator.add_file_handler(
+    outpath + "analysis", iter=rp.analysis_iter, max_writes=5000
+)
 
+analysis.add_task("integ( T * w , 'x') * Pr/L", layout="g", name="L_conv")
+analysis.add_task("integ( (-1)*Tz, 'x')/L", layout="g", name="L_cond")
+analysis.add_task("integ( integ( 0.5 * u*u * w*w, 'x'), 'z')", layout="g", name="KE")
 
 try:
     logger.info("Starting loop")
@@ -232,6 +242,12 @@ try:
                 )
             )
             logger.info("Max Re = {:1.3e}".format(flow.max("Re")))
+        if np.isnan(flow.max("Re")):
+            raise NanError
+except NaNError:
+    logger.error("Max Re is NaN. Triggering end of main loop.")
+except KeyboardInterrupt:
+    logger.info("User quit loop. Triggering end of loop.")
 except:
     logger.error("Exception raised, triggering end of main loop.")
     raise
