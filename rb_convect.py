@@ -57,7 +57,7 @@ if args.initial:
 # FUNCTION DEFINITIONS
 # ====================
 def initialise_problem(domain, Ra, Pr):
-    problem = de.IVP(domain, variables=["u", "w", "P", "T", "uz", "wz", "Tz"])
+    problem = de.IVP(domain, variables=["v", "w", "P", "T", "vz", "wz", "Tz"])
     problem.parameters["Ra"] = Ra
     problem.parameters["Pr"] = Pr
     problem.parameters["L"] = a
@@ -65,29 +65,29 @@ def initialise_problem(domain, Ra, Pr):
 
     # Set up d/dz equations
     problem.add_equation("Tz - dz(T) = 0")  # Allows Tz as shorthand for dT/dz
-    problem.add_equation("uz - dz(u) = 0")  # Allows uz as shorthand for du/dz
+    problem.add_equation("vz - dz(v) = 0")  # Allows vz as shorthand for dv/dz
     problem.add_equation("wz - dz(w) = 0")  # Allows wz as shorthand for dw/dz
 
     # Mass continuity equation
-    problem.add_equation("dx(u) + wz = 0")
+    problem.add_equation("dy(v) + wz = 0")
 
-    # x-component of Navier Stokes equation
-    problem.add_equation("dt(u) - Pr*(dx(dx(u)) + dz(uz)) + dx(P) = -(u*dx(u) + w*uz)")
+    # y-component of Navier Stokes equation
+    problem.add_equation("dt(v) - Pr*(dy(dy(v)) + dz(vz)) + dy(P) = -(v*dy(v) + w*vz)")
 
     # z-component of Navier Stokes equation
     problem.add_equation(
-        "dt(w) - Pr*(dx(dx(w)) + dz(wz)) - Ra*Pr*T + dz(P) = -(u*dx(w) + w*wz)"
+        "dt(w) - Pr*(dy(dy(w)) + dz(wz)) - Ra*Pr*T + dz(P) = -(v*dy(w) + w*wz)"
     )
 
     # Temperature equation
-    problem.add_equation("dt(T) - Pr*(dx(dx(T)) + dz(Tz)) = -(u*dx(T) + w*Tz)")
+    problem.add_equation("dt(T) - Pr*(dy(dy(T)) + dz(Tz)) = -(v*dy(T) + w*Tz)")
 
     # ====================
     # Add boundary conditions
     # ====================
     # Stress-Free horizontal boundaries
-    problem.add_bc("left(uz) = 0")
-    problem.add_bc("right(uz) = 0")
+    problem.add_bc("left(vz) = 0")
+    problem.add_bc("right(vz) = 0")
 
     # Impermeable side boundaries)
     problem.add_bc("left(w) = 0")
@@ -108,14 +108,14 @@ def analysis_task_setup(solver, outpath, an_iter):
     )
 
     # Conductive Heat Flux
-    analysis.add_task("integ( (-1)*Tz, 'x')/L", layout="g", name="L_cond")
+    analysis.add_task("integ( (-1)*Tz, 'y')/L", layout="g", name="L_cond")
 
     # Convective Heat Flux
-    analysis.add_task("integ( T * w, 'x') * Pr / L", layout="g", name="L_conv")
+    analysis.add_task("integ( T * w, 'y') * Pr / L", layout="g", name="L_conv")
 
     # Kinetic Energy
     analysis.add_task(
-        "integ( integ( 0.5*(u*u + w*w), 'x'), 'z')/D", layout="g", name="KE"
+        "integ( integ( 0.5*(v*v + w*w), 'y'), 'z')/D", layout="g", name="KE"
     )
 
     return analysis
@@ -127,22 +127,22 @@ def analysis_task_setup(solver, outpath, an_iter):
 
 if not args.initial:
     a = rp.a
-    Nx, Nz = rp.Nx, rp.Nz
+    Ny, Nz = rp.Ny, rp.Nz
     Pr = rp.Pr
     Ra = rp.Ra
 else:
     print("Reading initial conditions not yet implemented")
     a = rp.a
-    Nx, Nz = rp.Nx, rp.Nz
+    Ny, Nz = rp.Ny, rp.Nz
     Pr = rp.Pr
     Ra = rp.Ra
 
 # ====================
 # Create basis and domain
 # ====================
-xbasis = de.Fourier("x", Nx, interval=(0, a), dealias=3 / 2)
+ybasis = de.Fourier("y", Ny, interval=(0, a), dealias=3 / 2)
 zbasis = de.Chebyshev("z", Nz, interval=(0, 1), dealias=3 / 2)
-domain = de.Domain([xbasis, zbasis], grid_dtype=np.float64)
+domain = de.Domain([ybasis, zbasis], grid_dtype=np.float64)
 
 # ====================
 # Set Up Problems
@@ -159,7 +159,7 @@ logger.info("Solver built")
 # Initial Conditions
 # ====================
 if not args.initial:
-    x = domain.grid(0)
+    y = domain.grid(0)
     z = domain.grid(1)
     T = solver.state["T"]
     Tz = solver.state["Tz"]
@@ -208,11 +208,11 @@ cfl = flow_tools.CFL(
     max_dt=max_dt,
     threshold=0.05,
 )
-cfl.add_velocities(("u", "w"))
+cfl.add_velocities(("v", "w"))
 
 # Flow properties
 flow = flow_tools.GlobalFlowProperty(solver, cadence=10)
-flow.add_property("sqrt(u*u + w*w)", name="Re")
+flow.add_property("sqrt(v*v + w*w)", name="Re")
 
 # Save snapshots
 snapshots = solver.evaluator.add_file_handler(
@@ -221,13 +221,7 @@ snapshots = solver.evaluator.add_file_handler(
 snapshots.add_system(solver.state)
 
 # Analysis tasks
-analysis = solver.evaluator.add_file_handler(
-    outpath + "analysis", iter=rp.analysis_iter, max_writes=5000
-)
-
-analysis.add_task("integ( T * w , 'x') * Pr/L", layout="g", name="L_conv")
-analysis.add_task("integ( (-1)*Tz, 'x')/L", layout="g", name="L_cond")
-analysis.add_task("integ( integ( 0.5 * u*u * w*w, 'x'), 'z')", layout="g", name="KE")
+analysis = analysis_task_setup(solver, outpath, rp.analysis_iter)
 
 try:
     logger.info("Starting loop")
@@ -243,7 +237,7 @@ try:
             )
             logger.info("Max Re = {:1.3e}".format(flow.max("Re")))
         if np.isnan(flow.max("Re")):
-            raise NanError
+            raise NaNError
 except NaNError:
     logger.error("Max Re is NaN. Triggering end of main loop.")
 except KeyboardInterrupt:
