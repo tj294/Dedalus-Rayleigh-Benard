@@ -1,6 +1,13 @@
 """
-Pseudo-spectral 2D Rayleigh-Bénard convection simulation code.
+2D Boussinesq Rayleigh-Bénard Convection
+
+Equations are for the y-z plane, and have been non-dimensionalised using the
+viscous time.
+
 Author: Tom Joshi-Cale
+
+TO DO:
+
 """
 # ===================
 # ======IMPORTS======
@@ -11,6 +18,7 @@ import os
 from datetime import datetime
 import time
 import pathlib
+import shutil
 
 import argparse
 import run_params as rp
@@ -21,7 +29,7 @@ from dedalus.extras import flow_tools
 logger = logging.getLogger(__name__)
 
 
-class NaNError(Exception):
+class NaNFlowError(Exception):
     pass
 
 
@@ -72,15 +80,15 @@ def initialise_problem(domain, Ra, Pr):
     problem.add_equation("dy(v) + wz = 0")
 
     # y-component of Navier Stokes equation
-    problem.add_equation("dt(v) - Pr*(dy(dy(v)) + dz(vz)) + dy(P) = -(v*dy(v) + w*vz)")
+    problem.add_equation("dt(v) - (dy(dy(v)) + dz(vz)) + dy(P) = -(v*dy(v) + w*vz)")
 
     # z-component of Navier Stokes equation
     problem.add_equation(
-        "dt(w) - Pr*(dy(dy(w)) + dz(wz)) - Ra*Pr*T + dz(P) = -(v*dy(w) + w*wz)"
+        "dt(w) - (dy(dy(w)) + dz(wz)) - (Ra/Pr)*T + dz(P) = -(v*dy(w) + w*wz)"
     )
 
     # Temperature equation
-    problem.add_equation("dt(T) - Pr*(dy(dy(T)) + dz(Tz)) = -(v*dy(T) + w*Tz)")
+    problem.add_equation("dt(T) - (1/Pr)*(dy(dy(T)) + dz(Tz)) = -(v*dy(T) + w*Tz)")
 
     # ====================
     # Add boundary conditions
@@ -91,8 +99,8 @@ def initialise_problem(domain, Ra, Pr):
 
     # Impermeable side boundaries)
     problem.add_bc("left(w) = 0")
-    problem.add_bc("right(w) = 0", condition="(nx != 0)")
-    problem.add_bc("right(P) = 0", condition="(nx == 0)")
+    problem.add_bc("right(w) = 0", condition="(ny != 0)")
+    problem.add_bc("right(P) = 0", condition="(ny == 0)")
     #
     # Top boundary fixed at T=0
     problem.add_bc("right(T) = 0")
@@ -131,11 +139,12 @@ if not args.initial:
     Pr = rp.Pr
     Ra = rp.Ra
 else:
-    print("Reading initial conditions not yet implemented")
-    a = rp.a
-    Ny, Nz = rp.Ny, rp.Nz
-    Pr = rp.Pr
-    Ra = rp.Ra
+    with h5py.File(restart_path + "run_params/run_params_s1.h5", "r") as f:
+        a = int(np.array(f["tasks"]["a"]))
+        Ny = int(np.array(f["tasks"]["Ny"]))
+        Nz = int(np.array(f["tasks"]["Nz"]))
+        Pr = float(np.array(f["tasks"]["Pr"]))
+        Ra = float(np.array(f["tasks"]["Ra"]))
 
 # ====================
 # Create basis and domain
@@ -180,10 +189,10 @@ if not args.initial:
 
     fh_mode = "overwrite"
 else:
-    if pathlib.Path(restart_path + "restart.h5").exists():
-        write, last_dt = solver.load_state(args.initial + "restart.h5", -1)
+    if pathlib.Path(restart_path + "snapshots/snapshots_s1.h5").exists():
+        write, last_dt = solver.load_state(restart_path + "snapshots_s1.h5", -1)
     else:
-        print("{}restart.h5 does not exist.".format(restart_path))
+        print("{}restart.h5 does not exist.".format(restart_path + "snapshots_s1.h5"))
         exit(-10)
 
     dt = last_dt
@@ -215,13 +224,26 @@ flow = flow_tools.GlobalFlowProperty(solver, cadence=10)
 flow.add_property("sqrt(v*v + w*w)", name="Re")
 
 # Save snapshots
-snapshots = solver.evaluator.add_file_handler(
-    outpath + "snapshots", iter=rp.snapshot_iter, max_writes=5000
-)
-snapshots.add_system(solver.state)
+if save:
+    snapshots = solver.evaluator.add_file_handler(
+        outpath + "snapshots", iter=rp.snapshot_iter, max_writes=5000
+    )
+    snapshots.add_system(solver.state)
 
-# Analysis tasks
-analysis = analysis_task_setup(solver, outpath, rp.analysis_iter)
+    # Analysis tasks
+    analysis = analysis_task_setup(solver, outpath, rp.analysis_iter)
+
+    run_parameters = solver.evaluator.add_file_handler(
+        outpath + "run_params", wall_dt=1e20, max_writes=1
+    )
+    run_parameters.add_task(a, name="a")
+    run_parameters.add_task(Ny, name="Ny")
+    run_parameters.add_task(Nz, name="Nz")
+    run_parameters.add_task(Pr, name="Pr")
+    run_parameters.add_task(Ra, name="Ra")
+    run_parameters.add_task(max_dt, name="max_dt")
+    run_parameters.add_task(rp.snapshot_iter, name="snapshot_iter")
+    run_parameters.add_task(rp.analysis_iter, name="analysis_iter")
 
 try:
     logger.info("Starting loop")
@@ -237,8 +259,8 @@ try:
             )
             logger.info("Max Re = {:1.3e}".format(flow.max("Re")))
         if np.isnan(flow.max("Re")):
-            raise NaNError
-except NaNError:
+            raise NaNFlowError
+except NaNFlowError:
     logger.error("Max Re is NaN. Triggering end of main loop.")
 except KeyboardInterrupt:
     logger.info("User quit loop. Triggering end of loop.")
