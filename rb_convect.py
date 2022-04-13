@@ -13,8 +13,8 @@ TO DO:
 # ======IMPORTS======
 # ===================
 import numpy as np
-import logging
 import os
+import logging
 from datetime import datetime
 import time
 import pathlib
@@ -25,6 +25,7 @@ import run_params as rp
 
 import dedalus.public as de
 from dedalus.extras import flow_tools
+from dedalus.tools import post
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ if save:
 
 if args.initial:
     restart_path = os.path.normpath(args.initial) + "/"
+
 
 # ====================
 # FUNCTION DEFINITIONS
@@ -105,7 +107,7 @@ def initialise_problem(domain, Ra, Pr):
     # Top boundary fixed at T=0
     problem.add_bc("right(T) = 0")
     # Fixed heat flux through left boundary
-    problem.add_bc("left(Tz) = -1")
+    problem.add_bc("left(T) = 1")
 
     return problem
 
@@ -116,10 +118,13 @@ def analysis_task_setup(solver, outpath, an_iter):
     )
 
     # Conductive Heat Flux
-    analysis.add_task("integ( (-1)*Tz, 'y')/L", layout="g", name="L_cond")
+    analysis.add_task("integ( (-1) * Tz, 'y') / L", layout="g", name="L_cond")
 
     # Convective Heat Flux
     analysis.add_task("integ( T * w, 'y') * Pr / L", layout="g", name="L_conv")
+
+    # Average horizontal velocity
+    analysis.add_task("1 + integ( T*w, 'y') * Pr/L", layout="g", name="Nusselt")
 
     # Kinetic Energy
     analysis.add_task(
@@ -222,6 +227,7 @@ cfl.add_velocities(("v", "w"))
 # Flow properties
 flow = flow_tools.GlobalFlowProperty(solver, cadence=10)
 flow.add_property("sqrt(v*v + w*w)", name="Re")
+flow.add_property("1 + integ( integ( T * w, 'y') * Pr / L, 'z')", name="Nu")
 
 # Save snapshots
 if save:
@@ -258,6 +264,7 @@ try:
                 )
             )
             logger.info("Max Re = {:1.3e}".format(flow.max("Re")))
+            logger.info("Max Nu = {:.3e}".format(flow.grid_average("Nu")))
         if np.isnan(flow.max("Re")):
             raise NaNFlowError
 except NaNFlowError:
@@ -277,3 +284,7 @@ finally:
             (end_time - start_time) / 60 / 60 * domain.dist.comm_cart.size
         )
     )
+    if save:
+        post.merge_analysis(outpath + "analysis", cleanup=True)
+        post.merge_analysis(outpath + "snapshots", cleanup=True)
+        post.merge_analysis(outpath + "run_params", cleanup=True)
