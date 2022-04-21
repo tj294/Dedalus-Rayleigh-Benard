@@ -37,6 +37,13 @@ parser.add_argument(
     "-k", "--KE", help="Plot the kinetic energy only", action="store_true"
 )
 
+parser.add_argument(
+    "-n",
+    "--Nusselt",
+    help="Calculate the time-averaged Nusselt Number",
+    action="store_true",
+)
+
 args = parser.parse_args()
 
 direc = os.path.normpath(args.input) + "/"
@@ -64,6 +71,7 @@ if args.flux:
         L_conv_arr = np.array(file["tasks"]["L_conv"])[:, 0]
         KE = np.array(file["tasks"]["KE"])[:, 0]
         snap_t = np.array(file["scales"]["sim_time"])
+        Nu = np.array(file["tasks"]["Nusselt"])
 
     if (
         (avg_t_start <= snap_t[0])
@@ -87,6 +95,9 @@ if args.flux:
 
     mean_L_cond = np.mean(np.array(L_cond_arr[ASI:AEI]), axis=0)
     mean_L_conv = np.mean(np.array(L_conv_arr[ASI:AEI]), axis=0)
+    Nu_volume_ave = np.mean(Nu, axis=2)
+    Nu_time_ave = np.mean(Nu_volume_ave[ASI:AEI], axis=0)
+    print(Nu_time_ave)
 
     mean_L_tot = mean_L_cond + mean_L_conv
     del_L = np.max(np.abs(1.0 - mean_L_tot))
@@ -101,6 +112,10 @@ if args.flux:
     KE_ax.axvspan(
         snap_t[ASI], snap_t[AEI], color="r", alpha=0.5, label="Flux averaging"
     )
+    Nu_ax = KE_ax.twinx()
+    Nu_ax.plot(snap_t, Nu_volume_ave, color="g", lw=0.7)
+    Nu_ax.set_ylabel("Nu", color="g")
+    Nu_ax.tick_params(axis="y", labelcolor="g")
 
     L_ax = fig.add_subplot(212)
     L_ax.plot(z, mean_L_cond, "r", linestyle="-", label=r"$L_{cond}$")
@@ -108,6 +123,7 @@ if args.flux:
     L_ax.plot(z, mean_L_tot, "k", ls="-", label=r"$L_{total}$")
     L_ax.set_xlabel("z")
     L_ax.set_ylabel("L")
+    L_ax.set_title("Mean Nusselt No: {:.2f}".format(Nu_time_ave[0]))
     L_ax.legend()
     plt.savefig(direc + "fluxes.png")
     plt.show()
@@ -190,7 +206,7 @@ if args.heatmap:
                 yy,
                 zz,
                 np.transpose(T[i, :, :]),
-                levels=np.linspace(0, maxT),
+                levels=np.linspace(0, maxT, 11),
                 cmap="coolwarm",
             )
             c3_bar = fig.colorbar(c3, ax=T_ax)
@@ -232,8 +248,25 @@ if args.KE:
     ax = fig.add_subplot(111)
     ax.plot(snap_t, KE, "k")
     ax.set_xlabel(r"time [$\tau_\kappa$]")
-    ax.set_label("KE")
+    ax.set_ylabel("KE")
     plt.show()
     plt.close()
+
+if args.Nusselt:
+    with h5py.File(direc + "analysis/analysis_s1.h5", "r") as f:
+        Nu = np.array(f["tasks"]["Nusselt"])
+        snap_t = np.array(f["scales"]["sim_time"])
+
+    Nu_volume_ave = np.mean(Nu, axis=2)
+
+    fig = plt.figure(figsize=(6, 4))
+    fig.suptitle("2D\nRa={:.0e}, Pr={}".format(Ra, Pr))
+    ax = fig.add_subplot(111)
+    ax.plot(snap_t, Nu_volume_ave, "k")
+    ax.set_xlabel(r"time [$\tau_\kappa$]")
+    ax.set_ylabel("Nu(t)")
+    plt.show()
+    plt.close()
+
 
 print("done.")
