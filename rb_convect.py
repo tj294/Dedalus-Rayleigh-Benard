@@ -19,6 +19,7 @@ from datetime import datetime
 import time
 import pathlib
 import shutil
+import h5py
 
 import argparse
 import run_params as rp
@@ -112,9 +113,9 @@ def initialise_problem(domain, Ra, Pr):
     return problem
 
 
-def analysis_task_setup(solver, outpath, an_iter):
+def analysis_task_setup(solver, outpath, an_iter, fh_mode):
     analysis = solver.evaluator.add_file_handler(
-        outpath + "analysis", iter=an_iter, max_writes=5000
+        outpath + "analysis", iter=an_iter, max_writes=5000, mode=fh_mode
     )
 
     # Conductive Heat Flux
@@ -195,7 +196,9 @@ if not args.initial:
     fh_mode = "overwrite"
 else:
     if pathlib.Path(restart_path + "snapshots/snapshots_s1.h5").exists():
-        write, last_dt = solver.load_state(restart_path + "snapshots_s1.h5", -1)
+        write, last_dt = solver.load_state(
+            restart_path + "snapshots/snapshots_s1.h5", -1
+        )
     else:
         print("{}restart.h5 does not exist.".format(restart_path + "snapshots_s1.h5"))
         exit(-10)
@@ -232,12 +235,12 @@ flow.add_property("1 + integ( integ( T * w, 'y') * Pr / L, 'z')", name="Nu")
 # Save snapshots
 if save:
     snapshots = solver.evaluator.add_file_handler(
-        outpath + "snapshots", iter=rp.snapshot_iter, max_writes=5000
+        outpath + "snapshots", iter=rp.snapshot_iter, max_writes=5000, mode=fh_mode
     )
     snapshots.add_system(solver.state)
 
     # Analysis tasks
-    analysis = analysis_task_setup(solver, outpath, rp.analysis_iter)
+    analysis = analysis_task_setup(solver, outpath, rp.analysis_iter, fh_mode)
 
     run_parameters = solver.evaluator.add_file_handler(
         outpath + "run_params", wall_dt=1e20, max_writes=1
